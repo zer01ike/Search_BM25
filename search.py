@@ -3,6 +3,8 @@ import re
 import math
 import porter
 import os
+import getopt
+import sys
 
 
 class BM25(object):
@@ -166,7 +168,7 @@ class BM25(object):
 
                 result = freq * (1 + self.k) / (freq + self.k * ((1-self.b)+self.b * doclen/average_doclen))
 
-                result = result * math.log((totaldocsize - self.idfs[term] +0.5)/(self.idfs[term]+0.5), 10)
+                result = result * math.log((totaldocsize - self.idfs[term] +0.5)/(self.idfs[term]+0.5), 2)
                 value[term] = result
             self.BM25[docid] = value
         # print(self.BM25)
@@ -177,10 +179,97 @@ class BM25(object):
     def load_bm25(self):
         with open(self.bm25_file,'r') as f:
             self.BM25 = json.load(f)
+    def get_BM25(self):
+        return self.BM25
 
+    def get_stopwords(self):
+        return self.stopwords
+
+class search():
+    def __init__(self):
+        self.model = {}
+        self.porter = porter.PorterStemmer()
+
+    def search(self,argv):
+        if not argv:
+            self._helper_msg()
+            sys.exit(2)
+        try:
+            opts,args = getopt.getopt(argv,"-h-m:")
+        except getopt.GetoptError:
+            self._helper_msg()
+            sys.exit(2)
+
+        for opt,arg in opts:
+            if opt == '-h':
+                self._helper_msg()
+            elif opt == '-m':
+                if arg == 'manual':
+                    #load manual function
+                    model= BM25('./lisa/lisa.all.txt', './stopwords.txt')
+                    self.model = model.get_BM25()
+                    self.stopwords = model.get_stopwords()
+
+                    self.query()
+                elif arg == 'evaluation':
+                    #load evaluation function
+                    pass
+                else:
+                    print("Can't Find the Command you have typed")
+                    self._helper_msg()
+                    sys.exit(2)
+
+    def query(self):
+        query_words = input("Enter query:")
+        while query_words != 'QUIT':
+            self._query_result(query_words)
+            query_words = input("Enter query:")
+
+    def _query_result(self,query_words):
+        words = re.sub(r"[.(),?$%^*:\"\'/-]|[+——！，。？、~@#￥%……&*（）]", " ", query_words)
+        words = re.sub(r"\s+", " ", words)
+        words = words.lower().split(" ")
+
+        temp_word_vector =[]
+
+        for word in words:
+            if word not in self.stopwords:
+                word = self.porter.stem(word)
+
+                if word in temp_word_vector:
+                    continue
+                else:
+                    temp_word_vector.append(word)
+
+        simBM25={}
+
+        for docid,value in self.model.items():
+            score = 0
+
+            for words in temp_word_vector:
+                if words in value:
+                    score += value[words]
+
+            simBM25[docid] = score
+        sort_simBM25 = sorted(simBM25.items(),key=lambda item:item[1],reverse= True)
+
+        print('Results for query [{}]'.format(query_words))
+
+        rank = 1
+        for result in sort_simBM25[:15]:
+            if result[1] == 0 : break
+            print('{} {} {}'.format(rank,result[0],result[1]))
+            rank +=1
+
+
+    def _helper_msg(self):
+        print("usage:")
+        print("search.py -m manual")
+        print("serach.py -m evaluation")
 
 
 if __name__ == '__main__':
-    bm25 = BM25('./lisa/lisa.all.txt','./stopwords.txt')
+    s = search()
+    s.search(sys.argv[1:])
 
 
