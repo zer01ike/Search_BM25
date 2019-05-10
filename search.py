@@ -185,6 +185,240 @@ class BM25(object):
     def get_stopwords(self):
         return self.stopwords
 
+class evaluation():
+    def __init__(self):
+        self.sample_query_file = './lisa/lisa.queries.txt'
+        self.gt = './lisa/lisa.relevance.txt'
+        self.output = 'evaluation_output.txt'
+        self.query = {}
+        self.relevance ={}
+        self.prediction = {}
+        # self.process_example_query()
+
+        self.precision={}
+        self.recall ={}
+        self.precision_at_n ={}
+        self.r_precision ={}
+        self.average_precision_single_query ={}
+        self.map = 0
+        self.precision_mean=0
+        self.recall_mean=0
+        self.precision_at_n_mean=0
+        self.r_precision_mean =0
+
+    def calculate_precision_recall(self,queryid,relevances,predictions):
+        # using self.relevance and the self.prediction to calculate the precision
+        # self.relevance is a dict , k:queryid,v:dict(k:rank,v:docid)
+        # self.prediction is a dict to ,k:queryid,v:dict(k:rank,v:docid)
+
+        # precision is the relret / ret
+        # for queryid,relevances in self.relevance.items():
+        #     predictions = self.prediction[queryid]
+
+        ret = len(predictions)
+        rel = len(relevances)
+        relret = len(set(relevances.values()).intersection(set(predictions.values())))
+
+        self.precision[queryid] = relret * 1.0 / ret
+        self.recall[queryid] = relret * 1.0 / rel
+    def claculate_precision_at_n(self,n,queryid,relevances,predictions):
+        # for queryid,relevances in self.relevance.items():
+        #     predictions = self.prediction[queryid]
+
+        ret = n
+        relret = 0
+        for i in predictions.values():
+            for k, v in relevances.items():
+                if i == v:
+                    relret+=1
+        self.precision_at_n[queryid] = relret /ret
+
+    def calculate_r_precsion(self,r,queryid,relevances,predictions):
+        # for queryid,relevances in self.relevance.items():
+        #     predictions = self.prediction[queryid]
+
+        rel = len(relevances)
+        ret = 1
+        relret = 0
+        for i in predictions.values():
+            if i in relevances.values():
+                relret+=1
+
+            if (relret / rel > r):
+                self.r_precision[queryid] = relret/ret
+                break
+
+            ret+=1
+
+    def calculate_average_precision_single_query(self,queryid,relevances,predictions):
+        ret = 1
+        relret = 0
+        sum = 0
+        for i in predictions.values():
+            if i in relevances.values():
+                relret += 1
+                sum += relret / ret
+            ret += 1
+        self.average_precision_single_query[queryid] = sum / len(predictions)
+
+    def calcualte_map(self):
+        # for queryid,relevances in self.relevance.items():
+        #     predictions = self.prediction[queryid]
+
+        self.map = self.calculate_average(self.average_precision_single_query.values())
+        # sum =0
+        # for i in self.average_precision_single_query.values():
+        #     sum += i
+        #
+        # self.map = sum/len(self.average_precision_single_query)
+
+
+    def evaluation_all(self,n,r):
+
+        self.process_prediction_relevance()
+        self.process_example_relevance()
+
+        for queryid,relevances in self.relevance.items():
+            predictions = self.prediction[queryid]
+
+            self.calculate_precision_recall(queryid,relevances,predictions)
+            self.claculate_precision_at_n(n,queryid,relevances,predictions)
+            self.calculate_r_precsion(r,queryid,relevances,predictions)
+            self.calculate_average_precision_single_query(queryid,relevances,predictions)
+        self.calcualte_map()
+        self.calculate_all_average()
+        self.print_results()
+
+
+
+    def calculate_all_average(self):
+
+        self.precision_mean = self.calculate_average(self.precision.values())
+        self.recall_mean = self.calculate_average(self.recall.values())
+        self.precision_at_n_mean = self.calculate_average(self.precision_at_n.values())
+        self.r_precision_mean = self.calculate_average(self.r_precision.values())
+
+
+    def calculate_average(self,values):
+        if len(values) == 0 :return 0
+        sum = 0
+        for i in values:
+            sum +=i
+        return sum/len(values)
+
+    def print_results(self):
+        print("Evaluation results:")
+        print("{0:<21}{1:>5}".format('R-precision at R=0.4:', self.r_precision_mean))
+        print("{0:<21}{1:>5}".format('Precision:',self.precision_mean))
+        print("{0:<21}{1:>5}".format('Recall:',self.recall_mean))
+        print("{0:<21}{1:>5}".format('P@10:',self.precision_at_n_mean))
+        print("{0:<21}{1:>5}".format('MAP:',self.map))
+
+    def process_example_query(self):
+        with open(self.sample_query_file) as f:
+
+            sample_file = f.read()
+            samples = filter(None,sample_file.split('#\n'))
+            for i in samples:
+                i = i.split('\n')
+                id = int(i[0])
+                content = ' '.join(i[1:])
+                self.query[id] = content
+                # print (content)
+
+        sorted_query = sorted(self.query.items(), key=lambda item: item[0])
+        # sorted_query = sorted(self.query.keys())
+        return sorted_query
+
+    def save_result(self,queryid,sort_simBM25,total = 50):
+        rank = 1
+        # self.prediction[queryid] = sort_simBM25
+        with open(self.output,'a') as f:
+            for result in sort_simBM25[:total]:
+                f.write("{} {} {}\n".format(queryid,result[0],rank))
+                rank +=1
+
+    def calculate_score(self):
+        self.prediction = self.process_prediction_relevance()
+
+    def process_prediction_relevance(self):
+        with open(self.output) as f:
+            result = f.read()
+
+            lines = filter(None,result.split('\n'))
+            rank = 1
+            queryresult = {}
+            for line in lines:
+                queryid , docid, queryrank = line.split(' ')
+                if rank != int(queryrank):
+                    rank = 1
+                    self.prediction[int(queryid)-1]=queryresult
+                    queryresult = {}
+                    queryresult[rank] = int(docid)
+                else:
+                    queryresult[rank] = int(docid)
+
+                rank +=1
+            self.prediction[int(queryid)] = queryresult
+        # print(self.prediction)
+
+
+    def process_example_relevance(self):
+        with open(self.gt) as f:
+            sample_file = f.read()
+            sample_file = sample_file.split()
+            print(sample_file)
+            # three blocks here
+            # the third blocks length is defined by the second blocks
+            # the first block is the queryid
+            # start at 0 and 1
+
+            id_block = True
+            num_block = False
+            relevance_block = False
+            relevance_content = {}
+            current_relevance = 0
+            count = 0
+            id = 0
+            i =0
+            while i<len(sample_file):
+                if id_block:
+                    # if not First:
+                    #
+                    # else:
+                    #     First = False
+                    id = int(sample_file[i])
+                    id_block = False
+                    num_block = True
+
+                elif num_block:
+                    count = int(sample_file[i])
+                    num_block = False
+                    relevance_block = True
+                elif relevance_block:
+                    if count == current_relevance :
+                        relevance_block = False
+                        current_relevance = 0
+                        i -=1
+                        # id_block = True
+                    else:
+                        current_relevance +=1
+                        relevance_content[current_relevance]= int(sample_file[i])
+                else:
+                    self.relevance[id] = relevance_content
+                    relevance_content = {}
+                    id_block = True
+                    i-=1
+                i+=1
+            self.relevance[id] = relevance_content
+
+
+
+    def get_content(self):
+        return self.query
+
+
+
 class search():
     def __init__(self):
         self.model = {}
@@ -213,7 +447,24 @@ class search():
                     self.query()
                 elif arg == 'evaluation':
                     #load evaluation function
-                    pass
+                    model = BM25('./lisa/lisa.all.txt', './stopwords.txt')
+                    self.model = model.get_BM25()
+                    self.stopwords = model.get_stopwords()
+                    e = evaluation()
+                    if not os.path.exists('evaluation_output.txt'):
+                        id_and_words = e.process_example_query()
+
+                        for id,words in id_and_words:
+                            sort_simBM25=self._query_result(words)
+                            e.save_result(id,sort_simBM25,50)
+
+                    # e.process_prediction_relevance()
+                    # e.process_example_relevance()
+                    e.evaluation_all(10,0.4)
+
+
+
+
                 else:
                     print("Can't Find the Command you have typed")
                     self._helper_msg()
@@ -222,7 +473,8 @@ class search():
     def query(self):
         query_words = input("Enter query:")
         while query_words != 'QUIT':
-            self._query_result(query_words)
+            sort_simBM25=self._query_result(query_words)
+            self._print_query_result(sort_simBM25,query_words)
             query_words = input("Enter query:")
 
     def _query_result(self,query_words):
@@ -253,12 +505,18 @@ class search():
             simBM25[docid] = score
         sort_simBM25 = sorted(simBM25.items(),key=lambda item:item[1],reverse= True)
 
-        print('Results for query [{}]'.format(query_words))
+        return sort_simBM25
 
+    def _print_query_result(self,sort_simBM25,query_words):
+        print('Results for query [{}]'.format(query_words))
         rank = 1
+        # printed = False
         for result in sort_simBM25[:15]:
-            if result[1] == 0 : break
-            print('{} {} {}'.format(rank,result[0],result[1]))
+            # if result[1] == 0 and not printed:
+            #     print("Fllowing is the score 0 for the result")
+            #     printed = True
+            print("{0:>2} {1:>5} {2:.5f}".format(rank, int(result[0]), float(result[1])))
+            # print("{} {} {}".format(rank, int(result[0]), float(result[1])))
             rank +=1
 
 
@@ -271,5 +529,8 @@ class search():
 if __name__ == '__main__':
     s = search()
     s.search(sys.argv[1:])
+
+    # e  = evaluation()
+    # e.process_example_query()
 
 
